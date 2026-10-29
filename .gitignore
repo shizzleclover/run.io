@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local secrets and config: never commit. Copy env.example.json.
+env.json
+
+# Gradle output inside android/
+/android/build/
