@@ -16,6 +16,7 @@ import '../../shared/motion/motion.dart';
 import '../../shared/widgets/avatar_picker.dart';
 import '../../shared/widgets/player_avatar.dart';
 import '../../shared/widgets/wordmark.dart';
+import '../../state/account.dart';
 import '../../state/game_controller.dart';
 import 'onboarding_art.dart';
 
@@ -124,7 +125,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     final game = ref.read(gameProvider.notifier);
     game.createUser(name: _nameCtrl.text, color: _color, avatar: _avatar);
     if (!_discoverable) game.setDiscoverable(false);
-    context.go('/permissions');
+    // With accounts, the runner you just made gets a username next.
+    context.go(accountsEnabled ? '/auth' : '/permissions');
   }
 
   @override
@@ -147,6 +149,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 children: [
                   const Wordmark(color: AppColors.accent, size: 20),
                   const Spacer(),
+                  // Back on a new phone: skip setup, your account has it.
+                  if (accountsEnabled)
+                    TextButton(
+                      onPressed: () => context.push('/auth?mode=signin'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.textSecondary,
+                      ),
+                      child: const Text('Sign in'),
+                    ),
                   AnimatedOpacity(
                     opacity: _onSetup ? 0 : 1,
                     duration: AppMotion.base,

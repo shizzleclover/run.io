@@ -22,6 +22,9 @@ class GameRepository {
   static Future<GameRepository> open() async =>
       GameRepository._(await getApplicationDocumentsDirectory());
 
+  /// Saves in [dir] instead of the app's documents folder (tests).
+  factory GameRepository.at(Directory dir) => GameRepository._(dir);
+
   /// Loads the game and rescues any run that was in progress when the app
   /// was killed.
   Future<GameData> loadWithRecovery() async {

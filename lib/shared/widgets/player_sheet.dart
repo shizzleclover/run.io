@@ -8,10 +8,14 @@ import '../../app/theme/theme.dart';
 import '../../core/format.dart';
 import '../../core/live/presence.dart';
 import '../../engine/geo.dart';
+import '../../core/api/api_client.dart';
+import '../../state/account.dart';
+import '../../state/cloud_sync.dart';
 import '../../state/game_controller.dart';
 import '../../state/live_providers.dart';
 import '../../state/navigation.dart';
 import '../motion/motion.dart';
+import 'ghost_badge.dart';
 import 'player_avatar.dart';
 import 'stat_block.dart';
 
@@ -32,6 +36,20 @@ Future<void> showPlayerSheet(BuildContext context, String playerId) {
   );
 }
 
+/// The server's view of a player: land everywhere (not just what's loaded
+/// here) and whether they follow you. Null offline or for yourself.
+final _remotePlayerProvider = FutureProvider.autoDispose
+    .family<Map<String, dynamic>?, String>((ref, id) async {
+      final api = ref.watch(runioApiProvider);
+      if (api == null || !ref.watch(serverModeProvider)) return null;
+      if (id == ref.read(gameProvider).user?.id) return null;
+      try {
+        return await api.player(id);
+      } on ApiException {
+        return null;
+      }
+    });
+
 class _PlayerSheet extends ConsumerWidget {
   const _PlayerSheet({required this.playerId});
 
@@ -45,13 +63,17 @@ class _PlayerSheet extends ConsumerWidget {
     final p = game.playerById(playerId);
     if (p == null) return const SizedBox(height: 120);
     final isMe = p.id == game.user?.id;
-    final open = isMe || p.discoverable;
+    final open = isMe || p.isPublic;
     final board = ref.watch(leaderboardProvider);
     final cellArea = ref.watch(cellAreaProvider);
     final miles = game.settings.useMiles;
     final place = ref.watch(homeStateProvider)?.name;
     final rank = board.indexWhere((e) => e.player.id == p.id) + 1;
-    final cells = ref.watch(territoryIndexProvider).countOf(p.id);
+    final remote = ref.watch(_remotePlayerProvider(p.id)).value;
+    final serverMode = ref.watch(serverModeProvider);
+    final cells =
+        remote?['cells'] as int? ??
+        ref.watch(territoryIndexProvider).countOf(p.id);
     final area = Fmt.area(cells * cellArea);
     final live = (ref.watch(liveRunnersProvider).value ?? const <LiveRunner>[])
         .where((r) => r.playerId == p.id)
@@ -68,9 +90,12 @@ class _PlayerSheet extends ConsumerWidget {
       return '${d.value} ${d.unit}';
     }
 
+    final crew = game.crewByCode(p.crewId);
     final subtitle = [
       if (live != null) 'Running now',
       if (rank > 0) '#$rank${place == null ? '' : ' in $place'}',
+      if (open && crew != null) crew.name,
+      if (remote?['followsYou'] == true) 'Follows you',
       if (!open) 'Keeps their profile private',
     ].join('  ·  ');
 
@@ -147,12 +172,25 @@ class _PlayerSheet extends ConsumerWidget {
                         const SizedBox(height: AppSpace.xs),
                         Text(subtitle, style: AppText.small),
                       ],
+                      if (p.isRival) ...[
+                        const SizedBox(height: AppSpace.sm),
+                        const GhostBadge(),
+                      ],
                     ],
                   ),
                 ),
               ],
             ),
           ),
+          if (p.isRival) ...[
+            const SizedBox(height: AppSpace.lg),
+            Text(
+              'Ghost runners are simulated on your phone so there\'s always '
+              'land to fight for. Their land is real to take, and they '
+              'retreat as real runners join your area.',
+              style: AppText.small,
+            ),
+          ],
           const SizedBox(height: AppSpace.xxl),
           FadeSlideIn(
             index: 1,
@@ -205,19 +243,18 @@ class _PlayerSheet extends ConsumerWidget {
             index: 3,
             child: Row(
               children: [
-                if (!isMe && open) ...[
+                // Ghosts can't be followed once there are real runners.
+                if (!isMe && open && !(serverMode && p.isRival)) ...[
                   Expanded(
                     child: following
                         ? OutlinedButton(
-                            onPressed: () => ref
-                                .read(gameProvider.notifier)
-                                .toggleFollow(p.id),
+                            onPressed: () =>
+                                ref.read(cloudSyncProvider).toggleFollow(p.id),
                             child: const Text('Following'),
                           )
                         : FilledButton(
-                            onPressed: () => ref
-                                .read(gameProvider.notifier)
-                                .toggleFollow(p.id),
+                            onPressed: () =>
+                                ref.read(cloudSyncProvider).toggleFollow(p.id),
                             child: const Text('Follow'),
                           ),
                   ),
@@ -233,9 +270,132 @@ class _PlayerSheet extends ConsumerWidget {
               ],
             ),
           ),
+          if (serverMode && !isMe && !p.isRival) ...[
+            const SizedBox(height: AppSpace.md),
+            FadeSlideIn(
+              index: 4,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton(
+                    onPressed: () => _report(context, ref),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                    ),
+                    child: const Text('Report'),
+                  ),
+                  const SizedBox(width: AppSpace.md),
+                  TextButton(
+                    onPressed: () => _block(context, ref, p.shownName),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                    ),
+                    child: const Text('Block'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// Blocked runners can't follow you and show as anonymous to each other,
+  /// on the map too. Undo it in Settings → Account.
+  Future<void> _block(BuildContext context, WidgetRef ref, String name) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Block $name?', style: AppText.title(20)),
+        content: Text(
+          "You'll see each other as anonymous runners, and follows both ways "
+          'are removed. They are not told.',
+          style: AppText.bodyMuted,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    await _act(context, () async {
+      await ref.read(runioApiProvider)!.block(playerId);
+      final game = ref.read(gameProvider);
+      ref
+          .read(gameProvider.notifier)
+          .setFollowing({...game.following}..remove(playerId));
+    }, done: '$name is blocked');
+    if (context.mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _report(BuildContext context, WidgetRef ref) async {
+    const reasons = {
+      'cheating': 'Cheating (fake GPS, driving)',
+      'offensive_name': 'Offensive name',
+      'offensive_avatar': 'Offensive photo',
+      'harassment': 'Harassment',
+      'other': 'Something else',
+    };
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.screen,
+                0,
+                AppSpace.screen,
+                AppSpace.sm,
+              ),
+              child: Text('Why are you reporting?', style: AppText.section),
+            ),
+            for (final e in reasons.entries)
+              ListTile(
+                title: Text(e.value),
+                onTap: () => Navigator.pop(ctx, e.key),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (reason == null || !context.mounted) return;
+    await _act(
+      context,
+      () => ref.read(runioApiProvider)!.report(playerId, reason),
+      done: "Thanks. We'll take a look.",
+    );
+  }
+
+  Future<void> _act(
+    BuildContext context,
+    Future<void> Function() action, {
+    required String done,
+  }) async {
+    String message;
+    try {
+      await action();
+      message = done;
+    } on ApiException catch (e) {
+      message = e.message;
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   void _showOnMap(BuildContext context, WidgetRef ref, LiveRunner? live) {

@@ -243,6 +243,8 @@ ThemeData buildTheme(AppPalette p) {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.elevated,
+      // Clearly a placeholder, not something already typed.
+      hintStyle: AppText.body.copyWith(color: AppColors.textMuted),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.md),
         borderSide: BorderSide.none,

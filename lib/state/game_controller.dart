@@ -4,10 +4,12 @@ import 'dart:math' as math;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/theme/colors.dart';
+import '../core/areas.dart';
 import '../core/constants.dart';
 import '../core/models.dart';
 import '../core/regions.dart';
 import '../core/storage/game_repository.dart';
+import 'account.dart';
 import '../core/avatars.dart';
 import '../engine/claim_engine.dart';
 import '../engine/cut_rules.dart';
@@ -162,6 +164,186 @@ class GameController extends Notifier<GameData> {
     );
   }
 
+  /// Your profile as your account has it, after signing in. Makes your
+  /// player if this phone has none yet (a new phone, or a reinstall).
+  void adoptProfile({
+    required String name,
+    int? color,
+    String? avatar,
+    bool? discoverable,
+  }) {
+    final user = state.user;
+    _commit(
+      state.copyWith(
+        user: user == null
+            ? Player(
+                id: 'me_${DateTime.now().microsecondsSinceEpoch}',
+                name: name,
+                color: color ?? AppColors.playerColors.first,
+                avatar: avatar,
+                discoverable: discoverable ?? true,
+              )
+            : user.copyWith(
+                name: name,
+                color: color,
+                avatar: avatar,
+                discoverable: discoverable,
+              ),
+      ),
+    );
+  }
+
+  // ---------- server world ----------
+
+  /// Signing in hands the world to the server. Your player takes your
+  /// account's id; the phone's ghosts and land go, and the server's arrive.
+  /// Runs stay.
+  void enterServerWorld(String userId) {
+    final user = state.user;
+    if (user == null || user.id == userId) return;
+    _commit(
+      state.copyWith(
+        user: Player(
+          id: userId,
+          name: user.name,
+          color: user.color,
+          avatar: user.avatar,
+          discoverable: user.discoverable,
+          crewId: user.crewId,
+        ),
+        rivals: const [],
+        owners: const {},
+        touched: const {},
+        following: const {},
+        nearbyAlerted: const {},
+        crews: [
+          for (final c in state.crews)
+            if (!c.ghost) c,
+        ],
+      ),
+    );
+  }
+
+  /// Ownership for [regionIds] as the server has it. Cells of those
+  /// regions not in [cells] are neutral. [stale] are your faded cells.
+  void applyServerTerritory({
+    required Set<String> regionIds,
+    required Map<String, String> cells,
+    required Set<String> stale,
+    required List<Player> players,
+    List<Crew> crews = const [],
+  }) {
+    const regions = RegionGrid();
+    final owners = {
+      for (final e in state.owners.entries)
+        if (!regionIds.contains(regions.regionOf(e.key, _grid))) e.key: e.value,
+      ...cells,
+    };
+    final me = state.user?.id;
+    final today = epochDay(DateTime.now());
+    final touched = {
+      for (final e in cells.entries)
+        if (e.value == me)
+          // Faded on the server: draw it faded here too.
+          e.key: stale.contains(e.key) ? today - kDecay.staleAfterDays : today,
+    };
+    _commit(
+      _withPlayers(players, crews).copyWith(
+        owners: owners,
+        touched: {
+          for (final e in state.touched.entries)
+            if (owners[e.key] == me &&
+                !regionIds.contains(regions.regionOf(e.key, _grid)))
+              e.key: e.value,
+          ...touched,
+        },
+      ),
+    );
+  }
+
+  /// Live: [cells] now belong to [ownerId].
+  void applyServerClaim(
+    String ownerId,
+    List<String> cells, {
+    Player? owner,
+    Crew? crew,
+  }) {
+    final base = owner == null ? state : _withPlayers([owner], [?crew]);
+    final today = epochDay(DateTime.now());
+    final mine = ownerId == state.user?.id;
+    _commit(
+      base.copyWith(
+        owners: {...state.owners, for (final c in cells) c: ownerId},
+        touched: {
+          for (final e in state.touched.entries)
+            if (!cells.contains(e.key) || mine) e.key: e.value,
+          if (mine)
+            for (final c in cells) c: today,
+        },
+      ),
+    );
+  }
+
+  /// Live: [cells] went neutral (a cut, decay, a ghost going home).
+  void applyServerLoss(List<String> cells) {
+    final gone = cells.toSet();
+    _commit(
+      state.copyWith(
+        owners: {
+          for (final e in state.owners.entries)
+            if (!gone.contains(e.key)) e.key: e.value,
+        },
+        touched: {
+          for (final e in state.touched.entries)
+            if (!gone.contains(e.key)) e.key: e.value,
+        },
+      ),
+    );
+  }
+
+  /// Adds or refreshes other players (from the server), and the crews
+  /// they run with.
+  void upsertPlayers(List<Player> players, {List<Crew> crews = const []}) {
+    if (players.isEmpty) return;
+    _commit(_withPlayers(players, crews));
+  }
+
+  GameData _withPlayers(List<Player> players, [List<Crew> crews = const []]) {
+    final me = state.user?.id;
+    final byId = {for (final r in state.rivals) r.id: r};
+    for (final p in players) {
+      if (p.id != me) byId[p.id] = p;
+    }
+    // Your own crew's name is yours to keep in step; others come from cards.
+    final mine = state.user?.crewId;
+    final byCode = {for (final c in state.crews) c.code: c};
+    for (final c in crews) {
+      if (c.code != mine) byCode[c.code] = c;
+    }
+    return state.copyWith(
+      rivals: byId.values.toList(),
+      crews: byCode.values.toList(),
+    );
+  }
+
+  void setFollowing(Set<String> ids) => _commit(state.copyWith(following: ids));
+
+  /// Runs from your account that this phone doesn't have yet.
+  void mergeRuns(List<RunRecord> runs) {
+    final known = {for (final r in state.runs) r.id};
+    final fresh = [
+      for (final r in runs)
+        if (!known.contains(r.id)) r,
+    ];
+    if (fresh.isEmpty) return;
+    _commit(
+      state.copyWith(
+        runs: [...state.runs, ...fresh]
+          ..sort((a, b) => b.startedAt.compareTo(a.startedAt)),
+      ),
+    );
+  }
+
   void completePermissions() {
     if (!state.permissionsDone) _commit(state.copyWith(permissionsDone: true));
   }
@@ -252,11 +434,20 @@ class GameController extends Notifier<GameData> {
       if (guess != null) _commit(state.copyWith(homeState: guess.code));
     }
 
+    // Signed in: the server seeds ghosts, grows them and decays land.
+    if (ref.read(serverModeProvider)) {
+      if (state.home == null) _commit(state.copyWith(home: here));
+      return null;
+    }
+
     if (state.rivals.isEmpty) {
       _seed(here, user);
       return null;
     }
+    // Saves from before crews existed: put the ghosts in their crews.
+    if (!state.crews.any((c) => c.ghost)) _formGhostCrews();
     if (state.lastExpansionDay == _today()) return null;
+    _retreatGhosts(here);
 
     final today = epochDay(DateTime.now());
     final me = user.id;
@@ -287,7 +478,7 @@ class GameController extends Notifier<GameData> {
     };
     owners = RivalSeeder(_grid).expand(
       owners: owners,
-      rivalIds: [for (final r in state.rivals) r.id],
+      rivalIds: [for (final r in state.activeRivals) r.id],
       rng: math.Random(),
       targets: mine,
       weak: kDecay.stale(
@@ -334,8 +525,6 @@ class GameController extends Notifier<GameData> {
           color: colors[i % colors.length],
           isRival: true,
           avatar: presetAvatarId(rng.nextInt(kAvatarPresets.length)),
-          // A few runners keep to themselves, like real people will.
-          discoverable: rng.nextDouble() > 0.25,
         ),
       );
     }
@@ -352,6 +541,141 @@ class GameController extends Notifier<GameData> {
         owners: owners,
         home: here,
         lastExpansionDay: _today(),
+      ),
+    );
+    _formGhostCrews();
+  }
+
+  /// Ghosts run in two crews, so the crew board has someone to beat
+  /// before real crews sign up.
+  void _formGhostCrews() {
+    final places = [
+      ...?stateByCode(state.homeState)?.places,
+      ...kNationalPlaces,
+    ];
+    final suffixes = ['Pacers', 'Striders'];
+    final crews = [
+      for (var i = 0; i < suffixes.length; i++)
+        Crew(
+          code: 'GHOST-$i',
+          name: '${places[i % places.length]} ${suffixes[i]}',
+          ghost: true,
+        ),
+    ];
+    _commit(
+      state.copyWith(
+        crews: [
+          for (final c in state.crews)
+            if (!c.ghost) c,
+          ...crews,
+        ],
+        rivals: [
+          for (var i = 0; i < state.rivals.length; i++)
+            state.rivals[i].copyWith(
+              crewId: () => crews[i % crews.length].code,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Ghosts make way for real runners. With none around they all play;
+  /// each real runner in your area sends a share of them home, smallest
+  /// first, and their land goes neutral for real people to claim.
+  void _retreatGhosts(LatLng here) {
+    final center = areaAt(here)?.center ?? here;
+    final radius = areaAt(here)?.radiusM ?? kNearbyAreaRadiusM;
+    final real = <String>{};
+    final ghostCells = <String, int>{};
+    final ghostIds = {for (final r in state.activeRivals) r.id};
+    state.owners.forEach((cell, owner) {
+      if (Geo.haversine(_grid.center(cell), center) > radius) return;
+      if (ghostIds.contains(owner)) {
+        ghostCells[owner] = (ghostCells[owner] ?? 0) + 1;
+      } else {
+        real.add(owner);
+      }
+    });
+    if (state.user != null) real.add(state.user!.id);
+
+    final keep = (kRivalCount * (1 - real.length / kGhostRetreatRunners))
+        .ceil()
+        .clamp(0, kRivalCount);
+    final active = state.activeRivals
+      ..sort(
+        (a, b) => (ghostCells[b.id] ?? 0).compareTo(ghostCells[a.id] ?? 0),
+      );
+    if (active.length <= keep) return;
+    final leaving = {for (final r in active.skip(keep)) r.id};
+    _commit(
+      state.copyWith(
+        rivals: [
+          for (final r in state.rivals)
+            leaving.contains(r.id) ? r.copyWith(retired: true) : r,
+        ],
+        owners: Map.of(state.owners)
+          ..removeWhere((_, owner) => leaving.contains(owner)),
+      ),
+    );
+  }
+
+  // ---------- crews ----------
+
+  static const _codeChars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+  /// Start a crew and join it. Returns its invite code.
+  String createCrew(String name) {
+    final rng = math.Random.secure();
+    String part() => [
+      for (var i = 0; i < 4; i++) _codeChars[rng.nextInt(_codeChars.length)],
+    ].join();
+    final code = '${part()}-${part()}';
+    joinCrew(code: code, name: name);
+    return code;
+  }
+
+  /// Join the crew with [code]. Leaves your current crew.
+  void joinCrew({required String code, required String name}) {
+    final user = state.user;
+    final clean = name.trim();
+    if (user == null) return;
+    final crew = Crew(code: code, name: clean.isEmpty ? 'Crew $code' : clean);
+    _commit(
+      state.copyWith(
+        user: user.copyWith(crewId: () => code),
+        crews: [
+          for (final c in state.crews)
+            if (c.ghost) c,
+          crew,
+        ],
+      ),
+    );
+  }
+
+  void renameCrew(String name) {
+    final crew = state.myCrew;
+    final clean = name.trim();
+    if (crew == null || clean.isEmpty) return;
+    _commit(
+      state.copyWith(
+        crews: [
+          for (final c in state.crews)
+            c.code == crew.code ? Crew(code: c.code, name: clean) : c,
+        ],
+      ),
+    );
+  }
+
+  void leaveCrew() {
+    final user = state.user;
+    if (user == null) return;
+    _commit(
+      state.copyWith(
+        user: user.copyWith(crewId: () => null),
+        crews: [
+          for (final c in state.crews)
+            if (c.ghost) c,
+        ],
       ),
     );
   }
@@ -372,6 +696,10 @@ class GameController extends Notifier<GameData> {
       homeState: state.homeState,
       touched: state.touched,
       permissionsDone: state.permissionsDone,
+      crews: [
+        for (final c in state.crews)
+          if (!c.ghost) c,
+      ],
       // Rival ids are reused on reseed, but they're new people now.
       following: const {},
     );

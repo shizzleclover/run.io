@@ -24,6 +24,13 @@ sealed class AvatarSource {
   /// from [seed] (their player id), so it never changes between launches.
   factory AvatarSource.of(String? avatar, String seed) {
     if (avatar == 'anon') return const AnonymousAvatar();
+    // Someone else's photo, from the server.
+    if (avatar != null && avatar.startsWith('http')) {
+      return NetworkAvatar(
+        avatar,
+        fallback: AvatarSource.of(null, seed) as PresetAvatar,
+      );
+    }
     if (avatar != null && avatar.startsWith('f:')) {
       final file = AvatarStore.file(avatar.substring(2));
       if (file != null && file.existsSync()) return PhotoAvatar(file);
@@ -50,6 +57,14 @@ class AnonymousAvatar extends AvatarSource {
 class PhotoAvatar extends AvatarSource {
   const PhotoAvatar(this.file);
   final File file;
+}
+
+/// Another runner's photo, by link. [fallback] shows while it loads or if
+/// it can't.
+class NetworkAvatar extends AvatarSource {
+  const NetworkAvatar(this.url, {required this.fallback});
+  final String url;
+  final PresetAvatar fallback;
 }
 
 /// Photos live in <documents>/avatars. Set up once in main().

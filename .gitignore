@@ -49,3 +49,6 @@ env.json
 
 # Gradle output inside android/
 /android/build/
+
+# Node backend lives in its own repo, not the mobile one.
+/backend/

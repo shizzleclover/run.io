@@ -5,9 +5,11 @@ import '../../app/theme/colors.dart';
 import '../../app/theme/theme.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
+import '../../core/invite.dart';
 import '../../shared/widgets/card_format_toggle.dart';
 import '../../shared/widgets/player_chip.dart';
 import '../../shared/widgets/run_card.dart';
+import '../../state/cloud_sync.dart';
 import '../../state/game_controller.dart';
 import '../../app/theme/app_icons.dart';
 
@@ -32,7 +34,7 @@ class _SummarySheetState extends ConsumerState<SummarySheet> {
     try {
       await shareBoundary(
         _cardKey,
-        text: 'Just claimed ${area.value} ${area.unit} on run.io',
+        text: runShareText('${area.value} ${area.unit}'),
       );
     } finally {
       if (mounted) setState(() => _sharing = false);
@@ -132,7 +134,7 @@ class _SummarySheetState extends ConsumerState<SummarySheet> {
                 children: [
                   TextButton(
                     onPressed: () {
-                      ref.read(gameProvider.notifier).removeRun(run.id);
+                      ref.read(cloudSyncProvider).deleteRun(run.id);
                       Navigator.of(context).pop();
                     },
                     style: TextButton.styleFrom(

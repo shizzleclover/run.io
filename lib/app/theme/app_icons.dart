@@ -268,6 +268,125 @@ class AppIcons {
     fontPackage: _pkg,
   );
 
+  // Ghosts and crews
+  static const ghost = IconData(
+    0xe62a,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const crew = IconData(
+    0xe68e,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const crewActive = IconData(
+    0xe68e,
+    fontFamily: 'PhosphorFill',
+    fontPackage: _pkg,
+  );
+  static const copy = IconData(
+    0xe1ca,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const add = IconData(
+    0xe3d4,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const join = IconData(
+    0xe428,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+
+  // Accounts
+  static const inbox = IconData(
+    0xe0ce,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const search = IconData(
+    0xe30c,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const people = IconData(
+    0xe4d6,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const user = IconData(
+    0xe4c2,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const lock = IconData(
+    0xe2fa,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const available = IconData(
+    0xe184,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const unavailable = IconData(
+    0xe4f8,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const alert = IconData(
+    0xe4e2,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const offline = IconData(
+    0xe4f2,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const email = IconData(
+    0xe214,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const showPassword = IconData(
+    0xe220,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const hidePassword = IconData(
+    0xe224,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const signOut = IconData(
+    0xe42a,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const account = IconData(
+    0xe4c4,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const synced = IconData(
+    0xe1b0,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const notSynced = IconData(
+    0xe1b6,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+  static const paste = IconData(
+    0xe198,
+    fontFamily: 'PhosphorRegular',
+    fontPackage: _pkg,
+  );
+
   /// Built-in avatars: filled, so they read at small sizes on the map.
   static const List<IconData> avatars = [
     IconData(0xe730, fontFamily: 'PhosphorFill', fontPackage: _pkg),

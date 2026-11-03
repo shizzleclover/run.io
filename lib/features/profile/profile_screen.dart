@@ -9,6 +9,8 @@ import '../../shared/widgets/avatar_picker.dart';
 import '../../shared/widgets/player_avatar.dart';
 import '../../shared/widgets/stat_block.dart';
 import '../../shared/widgets/trail_painter.dart';
+import '../../core/api/api_client.dart';
+import '../../state/account.dart';
 import '../../state/game_controller.dart';
 import '../../app/theme/app_icons.dart';
 
@@ -43,7 +45,24 @@ class ProfileScreen extends ConsumerWidget {
         ],
       ),
     );
-    if (name != null) ref.read(gameProvider.notifier).rename(name);
+    if (name == null || name.trim().isEmpty) return;
+    if (ref.read(accountProvider) == null) {
+      ref.read(gameProvider.notifier).rename(name);
+      return;
+    }
+    // With an account the name is your username: unique, so the server
+    // has the final say.
+    try {
+      await ref.read(accountProvider.notifier).changeUsername(name.trim());
+    } on ApiException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text(e.field('username') ?? e.message)),
+          );
+      }
+    }
   }
 
   @override

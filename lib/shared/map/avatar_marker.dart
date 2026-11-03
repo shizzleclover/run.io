@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -56,6 +58,20 @@ Future<mb.MbxImage> renderAvatarMarker({
         fit: BoxFit.cover,
         filterQuality: FilterQuality.medium,
       );
+    case NetworkAvatar(:final url, :final fallback):
+      final bytes = await _download(url);
+      if (bytes == null) {
+        _iconDisc(canvas, inner, color, fallback.preset.icon, px);
+      } else {
+        final codec = await ui.instantiateImageCodec(bytes, targetWidth: w);
+        paintImage(
+          canvas: canvas,
+          rect: inner,
+          image: (await codec.getNextFrame()).image,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+        );
+      }
     case PresetAvatar(:final preset):
       _iconDisc(canvas, inner, color, preset.icon, px);
     case AnonymousAvatar():
@@ -70,6 +86,28 @@ Future<mb.MbxImage> renderAvatarMarker({
     height: image.height,
     data: bytes!.buffer.asUint8List(),
   );
+}
+
+final _downloads = <String, Uint8List?>{};
+
+/// Another runner's photo, fetched once per app run. Null if it fails.
+Future<Uint8List?> _download(String url) async {
+  if (_downloads.containsKey(url)) return _downloads[url];
+  Uint8List? bytes;
+  final http = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+  try {
+    final res = await (await http.getUrl(Uri.parse(url))).close();
+    if (res.statusCode == 200) {
+      final b = BytesBuilder(copy: false);
+      await res.forEach(b.add);
+      bytes = b.takeBytes();
+    }
+  } catch (_) {
+    // Offline or gone: the preset stands in.
+  } finally {
+    http.close();
+  }
+  return _downloads[url] = bytes;
 }
 
 /// Anonymous runners: one neutral colour, whatever their territory colour.

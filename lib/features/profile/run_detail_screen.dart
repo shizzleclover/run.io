@@ -5,9 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme/colors.dart';
 import '../../app/theme/theme.dart';
 import '../../core/format.dart';
+import '../../core/invite.dart';
 import '../../shared/widgets/card_format_toggle.dart';
 import '../../shared/widgets/player_chip.dart';
 import '../../shared/widgets/run_card.dart';
+import '../../state/cloud_sync.dart';
 import '../../state/game_controller.dart';
 import 'splits_view.dart';
 import '../../app/theme/app_icons.dart';
@@ -48,7 +50,7 @@ class _RunDetailScreenState extends ConsumerState<RunDetailScreen> {
       ),
     );
     if (ok == true && mounted) {
-      ref.read(gameProvider.notifier).removeRun(widget.runId);
+      ref.read(cloudSyncProvider).deleteRun(widget.runId);
       context.pop();
     }
   }
@@ -120,7 +122,7 @@ class _RunDetailScreenState extends ConsumerState<RunDetailScreen> {
           OutlinedButton.icon(
             onPressed: () => shareBoundary(
               _cardKey,
-              text: 'Claimed ${area.value} ${area.unit} on run.io',
+              text: runShareText('${area.value} ${area.unit}'),
             ),
             icon: const Icon(AppIcons.share, size: 18),
             label: const Text('Share'),

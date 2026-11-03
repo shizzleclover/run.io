@@ -12,6 +12,8 @@ class Player {
     this.isRival = false,
     this.avatar,
     this.discoverable = true,
+    this.crewId,
+    this.retired = false,
   });
 
   final String id;
@@ -25,19 +27,35 @@ class Player {
   /// alerts. Their territory still counts and shows, just without a name.
   final bool discoverable;
 
+  /// Shown with name and stats. Ghosts always are: there's nobody to
+  /// protect, and a nameless ghost just makes the board harder to read.
+  bool get isPublic => discoverable || isRival;
+
   /// What other people see. Your own name and avatar are always yours.
-  String get shownName => discoverable ? name : 'Anonymous runner';
-  String? get shownAvatar => discoverable ? avatar : kAnonymousAvatar;
+  String get shownName => isPublic ? name : 'Anonymous runner';
+  String? get shownAvatar => isPublic ? avatar : kAnonymousAvatar;
 
   /// ARGB int, e.g. 0xFF3DFF8A.
   final int color;
+
+  /// A ghost runner: simulated on this phone so the map is never empty.
+  /// Always labelled as one. They retreat as real runners arrive.
   final bool isRival;
+
+  /// Code of the crew they run with, if any. See [Crew].
+  final String? crewId;
+
+  /// A ghost that has retreated because enough real runners play here.
+  /// Kept so old runs can still name them, but out of the game.
+  final bool retired;
 
   Player copyWith({
     String? name,
     int? color,
     String? avatar,
     bool? discoverable,
+    String? Function()? crewId,
+    bool? retired,
   }) => Player(
     id: id,
     name: name ?? this.name,
@@ -45,6 +63,8 @@ class Player {
     isRival: isRival,
     avatar: avatar ?? this.avatar,
     discoverable: discoverable ?? this.discoverable,
+    crewId: crewId == null ? this.crewId : crewId(),
+    retired: retired ?? this.retired,
   );
 
   Map<String, dynamic> toJson() => {
@@ -54,6 +74,8 @@ class Player {
     'isRival': isRival,
     'avatar': avatar,
     'discoverable': discoverable,
+    'crewId': crewId,
+    'retired': retired,
   };
 
   factory Player.fromJson(Map<String, dynamic> j) => Player(
@@ -63,6 +85,34 @@ class Player {
     isRival: j['isRival'] as bool? ?? false,
     avatar: j['avatar'] as String?,
     discoverable: j['discoverable'] as bool? ?? true,
+    crewId: j['crewId'] as String?,
+    retired: j['retired'] as bool? ?? false,
+  );
+}
+
+/// A running club or group of friends. Members' territory adds up on the
+/// crew leaderboard.
+///
+/// Until there are accounts a crew lives on each member's phone: joining
+/// copies its name and code from the invite. The code is the id the
+/// backend will use, so phones that joined the same code merge into one
+/// crew later.
+class Crew {
+  const Crew({required this.code, required this.name, this.ghost = false});
+
+  /// e.g. 'K7QD-9XRM'. Ghost crews use `GHOST-n`.
+  final String code;
+  final String name;
+
+  /// Made up of ghost runners only.
+  final bool ghost;
+
+  Map<String, dynamic> toJson() => {'code': code, 'name': name, 'ghost': ghost};
+
+  factory Crew.fromJson(Map<String, dynamic> j) => Crew(
+    code: j['code'] as String,
+    name: j['name'] as String,
+    ghost: j['ghost'] as bool? ?? false,
   );
 }
 
@@ -234,6 +284,7 @@ class GameData {
     this.nearbyAlerted = const {},
     this.lastExpansionDay,
     this.permissionsDone = false,
+    this.crews = const [],
   });
 
   final Player? user;
@@ -272,18 +323,46 @@ class GameData {
   final String? lastExpansionDay;
   final bool permissionsDone;
 
+  /// Crews known on this phone: yours, if any, and the ghosts' crews.
+  final List<Crew> crews;
+
   factory GameData.empty() => const GameData();
 
-  List<Player> get players => [if (user != null) user!, ...rivals];
+  /// Everyone still in the game. Retired ghosts are left out.
+  List<Player> get players => [
+    if (user != null) user!,
+    for (final r in rivals)
+      if (!r.retired) r,
+  ];
+
+  /// Ghost runners still holding land.
+  List<Player> get activeRivals => [
+    for (final r in rivals)
+      if (!r.retired) r,
+  ];
 
   Map<String, int> get colorsById => {for (final p in players) p.id: p.color};
 
+  /// Anyone ever seen here, retired ghosts included, so old runs can
+  /// still say who cut you.
   Player? playerById(String id) {
-    for (final p in players) {
+    if (user?.id == id) return user;
+    for (final p in rivals) {
       if (p.id == id) return p;
     }
     return null;
   }
+
+  Crew? crewByCode(String? code) {
+    if (code == null) return null;
+    for (final c in crews) {
+      if (c.code == code) return c;
+    }
+    return null;
+  }
+
+  /// The crew you run with.
+  Crew? get myCrew => crewByCode(user?.crewId);
 
   RunRecord? runById(String id) {
     for (final r in runs) {
@@ -308,6 +387,7 @@ class GameData {
     Map<String, int>? nearbyAlerted,
     String? lastExpansionDay,
     bool? permissionsDone,
+    List<Crew>? crews,
   }) => GameData(
     user: user ?? this.user,
     rivals: rivals ?? this.rivals,
@@ -324,6 +404,7 @@ class GameData {
     nearbyAlerted: nearbyAlerted ?? this.nearbyAlerted,
     lastExpansionDay: lastExpansionDay ?? this.lastExpansionDay,
     permissionsDone: permissionsDone ?? this.permissionsDone,
+    crews: crews ?? this.crews,
   );
 
   Map<String, dynamic> toJson() => {
@@ -343,6 +424,7 @@ class GameData {
     'nearbyAlerted': nearbyAlerted,
     'lastExpansionDay': lastExpansionDay,
     'permissionsDone': permissionsDone,
+    'crews': [for (final c in crews) c.toJson()],
   };
 
   factory GameData.fromJson(Map<String, dynamic> j) => GameData(
@@ -375,6 +457,10 @@ class GameData {
     ),
     lastExpansionDay: j['lastExpansionDay'] as String?,
     permissionsDone: j['permissionsDone'] as bool? ?? false,
+    crews: [
+      for (final c in j['crews'] as List? ?? const [])
+        Crew.fromJson(c as Map<String, dynamic>),
+    ],
   );
 }
 

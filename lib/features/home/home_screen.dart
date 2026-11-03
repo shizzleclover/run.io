@@ -9,12 +9,18 @@ import '../../core/format.dart';
 import '../../core/live/presence.dart';
 import '../../core/models.dart';
 import '../../engine/geo.dart';
+import '../../shared/widgets/ghost_badge.dart';
 import '../../shared/widgets/player_avatar.dart';
 import '../../shared/widgets/player_sheet.dart';
+import '../../state/account.dart';
+import '../social/inbox_screen.dart';
+import '../../state/cloud_sync.dart';
 import '../../state/game_controller.dart';
 import '../../state/live_providers.dart';
 import '../../state/navigation.dart';
 import '../../shared/motion/motion.dart';
+import '../../state/area.dart';
+import 'area_card.dart';
 import 'heatmaps.dart';
 import 'week_card.dart';
 import '../../app/theme/app_icons.dart';
@@ -37,25 +43,31 @@ class HomeScreen extends ConsumerWidget {
     final color = Color(user.color);
     final cellArea = ref.watch(cellAreaProvider);
     final board = ref.watch(leaderboardProvider);
+    final areaBoard = ref.watch(areaBoardProvider);
+    final areaLabel = ref.watch(areaLabelProvider);
     final stale = ref.watch(staleCellsProvider);
     final live = ref.watch(liveRunnersProvider).value ?? const <LiveRunner>[];
     final place = ref.watch(homeStateProvider)?.name;
 
     final myCells = game.owners.values.where((o) => o == user.id).length;
-    final rank = board.indexWhere((e) => e.player.id == user.id) + 1;
+    // Ranked in your launch area when you're in one: a spot you can win.
+    final rank = areaLabel != null
+        ? areaBoard.indexWhere((e) => e.player.id == user.id) + 1
+        : board.indexWhere((e) => e.player.id == user.id) + 1;
+    final rankPlace = areaLabel ?? place;
     final total = Fmt.distance(
       game.runs.fold(0.0, (a, r) => a + r.distanceM),
       miles: game.settings.useMiles,
     );
 
     final following = [
-      for (final r in game.rivals)
+      for (final r in game.activeRivals)
         if (game.following.contains(r.id)) r,
     ];
     // Anonymous runners can't be followed or suggested.
     final others = [
-      for (final r in game.rivals)
-        if (!game.following.contains(r.id) && r.discoverable) r,
+      for (final r in game.activeRivals)
+        if (!game.following.contains(r.id) && r.isPublic) r,
     ];
 
     return Scaffold(
@@ -107,6 +119,7 @@ class HomeScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
+                if (ref.watch(serverModeProvider)) const _InboxButton(),
                 IconButton(
                   tooltip: 'Settings',
                   icon: const Icon(AppIcons.settings),
@@ -142,7 +155,8 @@ class HomeScreen extends ConsumerWidget {
             Text(
               [
                 'owned',
-                if (rank > 0) '#$rank${place == null ? '' : ' in $place'}',
+                if (rank > 0)
+                  '#$rank${rankPlace == null ? '' : ' in $rankPlace'}',
                 '${total.value} ${total.unit} run',
               ].join('  ·  '),
               style: AppText.bodyMuted,
@@ -166,6 +180,8 @@ class HomeScreen extends ConsumerWidget {
             const SizedBox(height: AppSpace.section),
             const FadeSlideIn(index: 1, child: WeekCard()),
             const SizedBox(height: AppSpace.section),
+            const FadeSlideIn(index: 2, child: AreaCard()),
+            const SizedBox(height: AppSpace.section),
             const FadeSlideIn(index: 2, child: ActivityCalendar()),
             const SizedBox(height: AppSpace.section),
             const FadeSlideIn(index: 3, child: RouteHeatmap()),
@@ -186,7 +202,17 @@ class HomeScreen extends ConsumerWidget {
             ],
 
             const SizedBox(height: AppSpace.section),
-            const _SectionTitle('Following'),
+            Row(
+              children: [
+                const Expanded(child: _SectionTitle('Following')),
+                if (ref.watch(serverModeProvider))
+                  TextButton.icon(
+                    onPressed: () => context.push('/people'),
+                    icon: const Icon(AppIcons.search, size: AppSize.iconSm),
+                    label: const Text('Find runners'),
+                  ),
+              ],
+            ),
             if (following.isEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -218,21 +244,6 @@ class HomeScreen extends ConsumerWidget {
                   onTap: () => showPlayerSheet(context, p.id),
                 ),
             ],
-
-            const SizedBox(height: 28),
-            Row(
-              children: [
-                Icon(AppIcons.invite, size: 18, color: AppColors.textMuted),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Invite friends and your running club. Coming with '
-                    'accounts.',
-                    style: AppText.small.copyWith(color: AppColors.textMuted),
-                  ),
-                ),
-              ],
-            ),
           ],
         ),
       ),
@@ -405,11 +416,23 @@ class _PlayerRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    player.shownName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.body.copyWith(fontWeight: FontWeight.w500),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          player.shownName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.body.copyWith(
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      if (player.isRival) ...[
+                        const SizedBox(width: AppSpace.sm),
+                        const GhostBadge(compact: true),
+                      ],
+                    ],
                   ),
                   if (subtitle.isNotEmpty) ...[
                     const SizedBox(height: 2),
@@ -439,7 +462,7 @@ class _FollowButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    void toggle() => ref.read(gameProvider.notifier).toggleFollow(playerId);
+    void toggle() => ref.read(cloudSyncProvider).toggleFollow(playerId);
     final style = TextButton.styleFrom(
       minimumSize: const Size(0, 34),
       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -491,4 +514,28 @@ class _AnonymousBadge extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// The bell, with a dot when something's unread.
+class _InboxButton extends ConsumerWidget {
+  const _InboxButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(unreadProvider).value ?? 0;
+    return IconButton(
+      tooltip: unread > 0 ? 'Inbox, $unread new' : 'Inbox',
+      color: AppColors.textSecondary,
+      onPressed: () async {
+        await context.push('/inbox');
+        ref.invalidate(unreadProvider);
+      },
+      icon: Badge(
+        isLabelVisible: unread > 0,
+        backgroundColor: AppColors.accent,
+        smallSize: 8,
+        child: const Icon(AppIcons.inbox),
+      ),
+    );
+  }
 }

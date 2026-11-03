@@ -5,10 +5,12 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app/app.dart';
+import 'core/api/session.dart';
 import 'core/avatars.dart';
 import 'core/env.dart';
 import 'core/notifications.dart';
 import 'core/storage/game_repository.dart';
+import 'state/account.dart';
 import 'state/game_controller.dart';
 
 Future<void> main() async {
@@ -32,12 +34,16 @@ Future<void> main() async {
   await AvatarStore.init(await getApplicationDocumentsDirectory());
   final repo = await GameRepository.open();
   final data = await repo.loadWithRecovery();
+  final sessions = await SessionStore.open(
+    await getApplicationDocumentsDirectory(),
+  );
 
   runApp(
     ProviderScope(
       overrides: [
         repositoryProvider.overrideWithValue(repo),
         initialDataProvider.overrideWithValue(data),
+        sessionStoreProvider.overrideWithValue(sessions),
       ],
       child: const RunIoApp(),
     ),

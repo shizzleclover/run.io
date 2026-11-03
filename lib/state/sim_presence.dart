@@ -97,7 +97,7 @@ class SimPresence implements PresenceService {
     final game = _ref.read(gameProvider);
     final index = _ref.read(territoryIndexProvider);
     final now = DateTime.now();
-    for (final r in game.rivals) {
+    for (final r in game.activeRivals) {
       if (_active.containsKey(r.id) || index.countOf(r.id) > 0) continue;
       final until = _outUntil[r.id];
       if (until == null) {
@@ -119,7 +119,7 @@ class SimPresence implements PresenceService {
     final game = _ref.read(gameProvider);
     final grid = _ref.read(gridProvider);
     final index = _ref.read(territoryIndexProvider);
-    final idle = game.rivals
+    final idle = game.activeRivals
         .where(
           (r) =>
               !_active.containsKey(r.id) &&

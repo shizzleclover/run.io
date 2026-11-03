@@ -19,14 +19,60 @@ class PermissionsScreen extends ConsumerStatefulWidget {
   ConsumerState<PermissionsScreen> createState() => _PermissionsScreenState();
 }
 
+/// Why we're still on this screen after the user tapped Continue.
+enum _Issue {
+  none,
+
+  /// Location services (GPS) are switched off for the whole phone.
+  gpsOff,
+
+  /// "Don't allow" once. Android lets us ask one more time.
+  denied,
+
+  /// Denied twice, or "don't ask again": only Settings can fix it.
+  blocked,
+}
+
 class _PermissionsScreenState extends ConsumerState<PermissionsScreen> {
-  bool _blocked = false;
+  _Issue _issue = _Issue.none;
   bool _busy = false;
+
+  // Coming back from Settings: pick up whatever the user changed there,
+  // so they don't have to find the right button again.
+  late final _lifecycle = AppLifecycleListener(onResume: _recheck);
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle; // start listening
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  Future<void> _recheck() async {
+    if (_issue == _Issue.none || _busy) return;
+    if (!await Geolocator.isLocationServiceEnabled()) return;
+    final perm = await Geolocator.checkPermission();
+    if (_granted(perm)) {
+      await _finish();
+    } else if (_issue == _Issue.gpsOff) {
+      // GPS is on now; carry on to the permission prompt.
+      await _request();
+    }
+  }
+
+  static bool _granted(LocationPermission p) =>
+      p == LocationPermission.whileInUse || p == LocationPermission.always;
 
   Future<void> _request() async {
     setState(() => _busy = true);
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
+        setState(() => _issue = _Issue.gpsOff);
         await Geolocator.openLocationSettings();
         return;
       }
@@ -34,27 +80,65 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen> {
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
-      if (perm == LocationPermission.deniedForever) {
-        setState(() => _blocked = true);
+      if (_granted(perm)) {
+        await _finish();
         return;
       }
-      if (perm == LocationPermission.whileInUse ||
-          perm == LocationPermission.always) {
-        ref.read(gameProvider.notifier).completePermissions();
-        // Run tracking and nearby runners both notify; ask once, here.
-        await Notifications.requestPermission();
-        // Restart the location stream now that we're allowed.
-        ref.invalidate(locationSourceProvider);
-        if (!mounted) return;
-        if (context.canPop()) {
-          context.pop();
-        } else {
-          context.go('/home');
-        }
-      }
+      if (!mounted) return;
+      setState(
+        () => _issue = perm == LocationPermission.deniedForever
+            ? _Issue.blocked
+            : _Issue.denied,
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _finish() async {
+    ref.read(gameProvider.notifier).completePermissions();
+    // Run tracking and nearby runners both notify; ask once, here.
+    await Notifications.requestPermission();
+    // Restart the location stream now that we're allowed.
+    ref.invalidate(locationSourceProvider);
+    if (!mounted) return;
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/home');
+    }
+  }
+
+  (String, Color)? get _notice => switch (_issue) {
+    _Issue.none => null,
+    _Issue.gpsOff => (
+      'Location is switched off on this phone. Turn it on, then come '
+          'back here.',
+      AppColors.warning,
+    ),
+    _Issue.denied => (
+      'run.io can\'t work without location: it\'s how your runs become '
+          'territory. Tap Try again and choose "While using the app".',
+      AppColors.warning,
+    ),
+    _Issue.blocked => (
+      'Location is blocked. In Settings, open Permissions → Location and '
+          'pick "While using the app". We\'ll notice when you\'re back.',
+      AppColors.danger,
+    ),
+  };
+
+  String get _buttonLabel => switch (_issue) {
+    _Issue.none => 'Continue',
+    _Issue.gpsOff => 'Turn on location',
+    _Issue.denied => 'Try again',
+    _Issue.blocked => 'Open settings',
+  };
+
+  VoidCallback? get _onPressed {
+    if (_busy) return null;
+    if (_issue == _Issue.blocked) return Geolocator.openAppSettings;
+    return _request;
   }
 
   @override
@@ -120,32 +204,29 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen> {
                             'where they are.',
                       ),
                     ),
-                    if (_blocked) ...[
-                      const SizedBox(height: AppSpace.xl),
-                      Container(
-                        padding: const EdgeInsets.all(AppSpace.lg),
-                        decoration: BoxDecoration(
-                          color: AppColors.danger.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(AppRadius.md),
-                        ),
-                        child: Text(
-                          'Location is blocked for run.io. Open settings, '
-                          'allow it, then come back.',
-                          style: AppText.body,
+                    if (_notice case (final text, final color))
+                      FadeSlideIn(
+                        key: ValueKey(_issue),
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: AppSpace.xl),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(AppSpace.lg),
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(AppRadius.md),
+                            ),
+                            child: Text(text, style: AppText.body),
+                          ),
                         ),
                       ),
-                    ],
                     const Spacer(),
                     const SizedBox(height: AppSpace.xl),
                     SizedBox(
                       width: double.infinity,
                       height: AppSize.button,
                       child: FilledButton(
-                        onPressed: _busy
-                            ? null
-                            : _blocked
-                            ? Geolocator.openAppSettings
-                            : _request,
+                        onPressed: _onPressed,
                         child: _busy
                             ? const SizedBox(
                                 width: 20,
@@ -155,16 +236,9 @@ class _PermissionsScreenState extends ConsumerState<PermissionsScreen> {
                                   color: AppColors.onAccent,
                                 ),
                               )
-                            : Text(_blocked ? 'Open settings' : 'Continue'),
+                            : Text(_buttonLabel),
                       ),
                     ),
-                    if (_blocked)
-                      Center(
-                        child: TextButton(
-                          onPressed: () => setState(() => _blocked = false),
-                          child: const Text('I\'ve allowed it, try again'),
-                        ),
-                      ),
                   ],
                 ),
               ),

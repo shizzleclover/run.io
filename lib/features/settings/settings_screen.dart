@@ -5,10 +5,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme/colors.dart';
 import '../../app/theme/theme.dart';
+import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
+import '../../core/env.dart';
 import '../../core/notifications.dart';
 import '../../core/regions.dart';
 import '../../engine/track_point.dart';
+import '../../state/account.dart';
 import '../../state/game_controller.dart';
 import '../../state/location_providers.dart';
 import '../../state/offline_map.dart';
@@ -65,6 +68,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (ok != true || !mounted) return;
     await ref.read(gameProvider.notifier).wipe();
     if (mounted) context.go('/onboarding');
+  }
+
+  Future<void> _signOut() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Sign out?', style: AppText.title(20)),
+        content: Text(
+          "Your land, runs and crew stay in your account. This phone's copy "
+          'is removed; sign back in to get it back.',
+          style: AppText.bodyMuted,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await ref.read(accountProvider.notifier).signOut();
   }
 
   void _reseed() {
@@ -239,6 +269,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       gameProvider.select((g) => g.user?.discoverable ?? true),
     );
     final homeState = ref.watch(homeStateProvider);
+    final session = ref.watch(accountProvider);
     final game = ref.read(gameProvider.notifier);
 
     return Scaffold(
@@ -246,6 +277,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 40),
         children: [
+          if (session != null) ...[
+            const _Section('Account'),
+            ListTile(
+              leading: const Icon(AppIcons.account, size: AppSize.icon),
+              title: Text(session.username),
+              subtitle: Text(session.email, style: AppText.small),
+              trailing: const Icon(AppIcons.chevron),
+              onTap: () => context.push('/settings/account'),
+            ),
+            ListTile(
+              leading: const Icon(
+                AppIcons.signOut,
+                size: AppSize.icon,
+                color: AppColors.danger,
+              ),
+              title: const Text(
+                'Sign out',
+                style: TextStyle(color: AppColors.danger),
+              ),
+              onTap: _signOut,
+            ),
+          ],
+          if (session != null) const _QuietHoursTile(),
           const _Section('Appearance'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -420,7 +474,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onTap: _onVersionTap,
               child: Padding(
                 padding: const EdgeInsets.all(12),
-                child: Text('run.io v$kAppVersion', style: AppText.small),
+                child: Text(
+                  Env.appEnv == 'prod'
+                      ? 'run.io v$kAppVersion'
+                      : 'run.io v$kAppVersion · ${Env.appEnv}',
+                  style: AppText.small,
+                ),
               ),
             ),
           ),
@@ -442,4 +501,47 @@ class _Section extends StatelessWidget {
       style: AppText.label.copyWith(color: AppColors.textMuted),
     ),
   );
+}
+
+/// Quiet hours, 22:00 to 07:00 Lagos time: no pushes overnight. The feed
+/// still collects everything.
+final _quietProvider = FutureProvider.autoDispose<bool>((ref) async {
+  final res =
+      await ref.read(apiProvider)!.get('/me/notifications')
+          as Map<String, dynamic>;
+  return res['quietHours'] != null;
+});
+
+class _QuietHoursTile extends ConsumerWidget {
+  const _QuietHoursTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final quiet = ref.watch(_quietProvider);
+    return SwitchListTile(
+      secondary: const Icon(AppIcons.dark, size: AppSize.icon),
+      title: const Text('Quiet at night'),
+      subtitle: Text(
+        'No notifications from 22:00 to 07:00',
+        style: AppText.small,
+      ),
+      value: quiet.value ?? false,
+      onChanged: quiet.hasValue
+          ? (on) async {
+              try {
+                await ref.read(apiProvider)!.put('/me/notifications', {
+                  'quietHours': on ? {'start': 22, 'end': 7} : null,
+                });
+              } on ApiException catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(SnackBar(content: Text(e.message)));
+                }
+              }
+              ref.invalidate(_quietProvider);
+            }
+          : null,
+    );
+  }
 }

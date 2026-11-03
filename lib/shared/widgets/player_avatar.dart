@@ -28,19 +28,29 @@ class PlayerAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = AvatarSource.of(avatar, seed);
+    Widget presetDisc(AvatarPreset preset) => ColoredBox(
+      color: color,
+      child: Center(
+        child: Icon(preset.icon, color: Colors.white, size: size * 0.5),
+      ),
+    );
     final inner = switch (source) {
+      NetworkAvatar(:final url, :final fallback) => Image.network(
+        url,
+        fit: BoxFit.cover,
+        cacheWidth: (size * 3).round(),
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => presetDisc(fallback.preset),
+        loadingBuilder: (_, child, progress) =>
+            progress == null ? child : presetDisc(fallback.preset),
+      ),
       PhotoAvatar(:final file) => Image.file(
         file,
         fit: BoxFit.cover,
         cacheWidth: (size * 3).round(),
         gaplessPlayback: true,
       ),
-      PresetAvatar(:final preset) => ColoredBox(
-        color: color,
-        child: Center(
-          child: Icon(preset.icon, color: Colors.white, size: size * 0.5),
-        ),
-      ),
+      PresetAvatar(:final preset) => presetDisc(preset),
       AnonymousAvatar() => ColoredBox(
         color: kAnonymousGrey,
         child: Center(
@@ -56,10 +66,10 @@ class PlayerAvatar extends StatelessWidget {
       width: size,
       height: size,
       padding: EdgeInsets.all(
-        ring && source is PhotoAvatar ? (size * 0.06).clamp(1.5, 4) : 0,
+        ring && _isPhoto(source) ? (size * 0.06).clamp(1.5, 4) : 0,
       ),
       decoration: BoxDecoration(
-        color: ring && source is PhotoAvatar ? color : Colors.transparent,
+        color: ring && _isPhoto(source) ? color : Colors.transparent,
         shape: BoxShape.circle,
       ),
       child: ClipOval(
@@ -68,3 +78,5 @@ class PlayerAvatar extends StatelessWidget {
     );
   }
 }
+
+bool _isPhoto(AvatarSource s) => s is PhotoAvatar || s is NetworkAvatar;

@@ -11,6 +11,7 @@ import '../../app/theme/colors.dart';
 import '../../app/theme/theme.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
+import '../../state/area.dart';
 import '../../state/game_controller.dart';
 import 'player_avatar.dart';
 import 'stat_block.dart';
@@ -43,6 +44,7 @@ class RunCard extends ConsumerWidget {
     final cells = [for (final c in run.cells) grid.boundary(c, inset: 0.06)];
     final user = game.user;
     final place = ref.watch(homeStateProvider)?.name;
+    final launchArea = ref.watch(areaProvider)?.name;
 
     return AspectRatio(
       aspectRatio: story ? 9 / 16 : 4 / 5,
@@ -83,9 +85,9 @@ class RunCard extends ConsumerWidget {
                           overflow: TextOverflow.ellipsis,
                           style: AppText.title(18),
                         ),
-                        if (place != null)
+                        if (launchArea ?? place case final where?)
                           Text(
-                            'Running in $place',
+                            'Running in $where',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: AppText.small,
@@ -141,6 +143,16 @@ class RunCard extends ConsumerWidget {
                 ),
               ],
             ),
+            if (story) ...[
+              const SizedBox(height: 22),
+              Text(
+                'Think you can take it? Get run.io',
+                style: AppText.small.copyWith(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ],
         ),
       ),
